@@ -1,0 +1,327 @@
+% Rewritten based on project.md
+% LLNCS macro package for Springer Computer Science proceedings
+% Version 2.21 of 2022/01/12
+%
+\documentclass[runningheads]{llncs}
+%
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\renewcommand\UrlFont{\color{blue}\rmfamily}
+\urlstyle{rm}
+%
+\begin{document}
+%
+\title{Prediction of Water Saturation from Nuclear Magnetic Resonance Raw Signals Using Deep Physics-Informed Neural Network}
+
+\titlerunning{Water Saturation Prediction from NMR Signals}
+
+\author{
+Arick Jurdan dos Reis\inst{1} \and
+Lorena Mamede Botelho\inst{1} \and
+Claudio Miceli de Farias\inst{1} \and
+Juan Pedro Perri Barreto\inst{1} \and
+Marcio Mendes Taddei\inst{2}
+}
+
+\authorrunning{A. J. Reis, et al.}
+
+\institute{
+Instituto T\'{e}rcio Pacitti de Aplica\c{c}\~{o}es e Pesquisas Computacionais (NCE),
+Federal University of Rio de Janeiro (UFRJ), Rio de Janeiro, Brazil
+\email{
+    \begin{tabular}{c}
+      arickjurdan.20221@poli.ufrj.br \quad lorenamb@cos.ufrj.br\\
+      cmicelifarias@cos.ufrj.br \quad
+      juanperri@ufrj.br \quad
+    \end{tabular}}
+    \vspace{0.3cm}
+\and 
+Brazilian Center for Research in Physics (CBPF),
+Rio de Janeiro, Brazil
+\email{mtaddei@cbpf.br}
+}
+
+
+
+\maketitle
+%
+\begin{abstract}
+Water saturation is a key petrophysical property for reservoir characterization and hydrocarbon volume estimation.
+Conventional approaches rely on inverting Nuclear Magnetic Resonance (NMR) relaxation decays into $T_2$ distributions
+and applying empirical cutoff values, a process that is sensitive to modeling choices. Recently, some works explore using directly NMR decay in order to obtain petrophysical properties ~\cite{ref_fraga2025,ref_liu_j2022}. In this work, we propose a physical infromed neural network with a robust pre-processing steps that receve raw NMR signa and can predict irreductive water saturation (Swirr). We compare two input strategies of input data, raw magnetization curves decay and time series features extractions, both in a PINN model with hyperparameters optimized via Tree-structured Parzen Estimator (TPE) in Optuna.
+Also an ensemble of the best-performing conventional network and physics-informed branches is proposed.
+Models are evaluated on synthetic NMR data using MAE and RMSE.
+Results indicate that the raw-curve approach, combined with appropriate preprocessing and
+physics-informed regularization, can yield competitive saturation estimates while avoiding the uncertainties inherent in $T_2$ inversion.
+
+\keywords{NMR \and Water saturation \and Deep learning \and Physics-informed neural network \and Reservoir characterization}
+\end{abstract}
+
+%% ===================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Accurate determination of water saturation ($S_w$) is essential for estimating hydrocarbon volumes
+and planning reservoir development. Nuclear Magnetic Resonance (NMR) logging is one of the primary
+tools for this task: the Carr--Purcell--Meiboom--Gill (CPMG) sequence measures transverse
+magnetization decays whose relaxation times encode information about pore-size distributions,
+fluid types, and saturations~\cite{ref_coates1999}.
+
+
+The standard workflow first inverts the raw echo train $M(t)$ into a $T_2$ relaxation-time
+distribution using regularized inverse Laplace transforms (e.g., Tikhonov regularization).
+A cutoff value is then applied to partition bound and free fluid, from which $S_w$ is inferred.
+This two-step procedure, however, is inherently ill-posed: the inversion is sensitive to
+regularization parameters and noise models, meaning that different implementations can yield
+different $T_2$ distributions and, therefore, different saturations from the same echo data time series. [citar artigo cbpf].
+Setting the cutoff value introduces additional ambiguity, and several competing methods have been proposed without a clear consensus [citar artigos de comparação cutoff].
+
+These difficulties are amplified in unconventional reservoirs such as shales, where strong
+heterogeneity, multi-fluid signal overlap, and weak relaxation responses undermine conventional
+cutoff- and template-based saturation methods~\cite{ref_li2026}.
+
+Recent advances in deep learning (DL) offer an alternative path. DL models can learn complex
+nonlinear mappings from high-dimensional inputs without explicit physical modeling and have already
+been applied successfully to several petrophysical tasks: lithology classification~\cite{ref_valentin2019},
+porosity and permeability prediction~\cite{ref_bom2021}, and subsurface
+characterization~\cite{ref_kurup2006}. Notably, Coutinho et al.~\cite{ref_fraga2025} demonstrated
+that a convolutional neural network (CNN) can estimate irreducible water saturation ($S_{wirr}$)
+directly from raw NMR echo trains with a [mostrar resultados], bypassing
+the $T_2$ inversion entirely. Similarly, Li et al.~\cite{ref_li2026} proposed a workflow that
+combines unsupervised feature decoupling with a compact CNN to predict oil saturation from
+$T_2$ spectra in shale reservoirs. 
+
+In this work, we extend the direct-prediction paradigm to water saturation by systematically
+comparing a wide range of machine-learning and deep-learning architectures on synthetic NMR data.
+We further propose a physics-informed MLP that incorporates known physical constraints into the
+learning process, and combine it with conventional models in an ensemble pipeline.
+
+The main contribution of this paper is to provide a clear prediction framework and trace the technological evolution of using NMR echo data, offering valuable reference points for 
+future research.
+
+\subsection{Improvement of NMR Logging Porosity Model}
+
+
+
+%% ===================================================================
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Traditional NMR-Based Estimation of Irreducible Water Saturation}
+
+Estimating irreducible water saturation ($S_{wirr}$) from NMR measurements is a fundamental step in several permeability models, particularly the Timur--Coates formulation. A traditional approach is presented by Al-Mahrooqi et al.~\cite{ref_almahrooqi}, who investigated different methods for estimating $S_{w,irr}$ in tight formations using NMR relaxometry. The study evaluated three approaches: (i) the conventional fixed $T_2$ cutoff method, commonly using a cutoff of 10 ms for tight reservoirs; (ii) laboratory centrifugation experiments to directly measure irreducible saturation; and (iii) a novel peak-area analysis method based on the area under the NMR amplitude--$T_2$ distribution curve. The methodology was validated on 81 core plugs from multiple unconventional formations, comparing the resulting $S_{w,irr}$ estimates through permeability predictions obtained with the Timur--Coates model. The authors demonstrated that the peak-area method provides more accurate estimates than the fixed $T_2$ cutoff approach and, in some cases, outperforms centrifuge-based measurements while requiring only a single NMR acquisition. Due to its widespread acceptance and physical interpretability, the NMR-based estimation of $S_{w,irr}$ using $T_2$ distributions and BVI/FFI partitioning is adopted in this work as the traditional benchmark against which the proposed deep-learning approach is compared.
+
+
+
+\subsection{DeepSWIrr}
+
+
+Fraga, B., Coutinho, B.~\cite{ref_fraga2025} estimated irreducible water saturation ($S_{wirr}$)
+directly from laboratory NMR echo trains using a multi-scale convolutional network.
+Working with 821~carbonate-reservoir plugs from the Brazilian pre-salt, they preprocessed
+the data by rotating channels to separate signal from noise and truncating each echo train
+to 1000~points. Because labeled laboratory samples were scarce, a physically motivated
+data-augmentation scheme was introduced: pairs or triplets of plugs are linearly combined
+with a random weight~$w$, yielding synthetic magnetization curves
+\begin{equation}
+  m(w) = w\,m_1 + (1-w)\,m_2
+  \label{eq:aug_m}
+\end{equation}
+and corresponding synthetic saturations
+\begin{equation}
+  S_w(w) =
+  \frac{w\,S_{w,1}\,V_{B,1}\,\phi_1 + (1-w)\,S_{w,2}\,V_{B,2}\,\phi_2}
+       {w\,V_{B,1}\,\phi_1 + (1-w)\,V_{B,2}\,\phi_2},
+  \label{eq:aug_sw}
+\end{equation}
+where $V_B$ denotes bulk volume and $\phi$~porosity.
+The model achieved a correlation of approximately~0.9 on a 50-plug blind test set,
+with better performance on low-bulkiness samples. Inspired by this approach, we adopt this specific, physically motivated data-augmentation methodology in our study to effectively expand our dataset and improve model generalization.
+
+\subsection{Direct Prediction of Oil Saturation from NMR $T_2$ Spectra}
+Li et al.~\cite{ref_li2026} proposed a data-driven workflow for predicting oil saturation
+from NMR~$T_2$ spectra in shale reservoirs. Their pipeline applies robust preprocessing,
+dimensionality reduction, unsupervised clustering to decouple overlapping fluid signals,
+and a lightweight CNN regressor. Validated on core--log paired data, the method showed
+improved stability over conventional interpretation in complex intervals.
+
+
+%% ===================================================================
+\section{Methodology}
+\label{sec:method}
+
+
+\subsection{Dataset Description}
+\label{subsec:data}
+
+To investigate and validate our methods we utilizes the \textit{Nuclear Magnetic Resonance Synthetics Dataset from Gulf of Mexico Gas Hydrate} \cite{Reis2026}. This synthetic dataset provides highly detailed NMR profiles that simulate transverse magnetization decay, $M(t)$, directly based on volumetric well-logging from Gulf of Mexico gas hydrate reservoirs.
+
+The data generation process was driven by rigorous forward physical modeling. It correlates macroscopic petrophysical data with quantum relaxation decays occurring within water-saturated pores, which are mathematically characterized by log-normal distributions. Because this dataset accurately reflects complex, real-world rock physics, it serves as an ideal foundation for underpinning our theoretical comparisons.
+
+
+\subsection{Input Strategies}
+\label{sec:input}
+
+We investigate two complementary input representations:
+
+\paragraph{Raw-curve approach.}
+The input features~$\mathbf{X}$ are the temporal samples of the magnetization decay $M(t)$
+(e.g., 3000~echoes from a CPMG sequence), and the target~$Y$ is the water
+saturation~$S_w$.
+
+\paragraph{Time series feature extraction approach}: we additionally extract time-series features using the
+TSFresh library~\cite{CHRIST201872}. TSFresh applies statistical hypothesis tests to assess
+feature relevance, reducing overfitting risk while scaling efficiently to multiple simultaneous
+time series. We evaluate three extraction levels at two input lengths (700 and 2000~points):
+\begin{itemize}
+  \item \texttt{MinimalFCParameters}: fast and stable baseline features.
+  \item \texttt{EfficientFCParameters}: a richer feature set with moderate computational cost.
+  \item \texttt{ComprehensiveFCParameters}: an exhaustive but computationally expensive feature set.
+\end{itemize}
+
+\subsection{}
+
+
+
+
+
+\section{Results}
+\label{sec:results}
+
+
+
+%% ===================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+
+
+%% ===================================================================
+\begin{credits}
+
+\subsubsection{\ackname}
+
+The authors would like to thank the Brazilian Center for Research in Physics (CBPF), especially Marcelo Portes de Albuquerque, for their support and encouragement; Bernardo Coutinho (Petrobras) for his valuable technical contributions and discussions; and the LabNet Laboratory at UFRJ for providing the infrastructure necessary to conduct this study
+
+\subsubsection{\discintname}
+The authors have no competing interests to declare that are relevant to the
+content of this article.
+\end{credits}
+
+%% ===================================================================
+% Bibliography
+\bibliographystyle{splncs04}
+\begin{thebibliography}{15}
+
+
+%%%% Teoria
+\bibitem{ref_coates1999}
+Coates, G.R., Xiao, L., Prammer, M.G.:
+NMR Logging: Principles and Applications.
+Halliburton Energy Services, Houston (1999)
+
+
+%%%% BASE DE DADOS
+\bibitem{Reis2026}
+A. Reis and L. Mamede Botelho,
+``Nuclear Magnetic Resonance Synthetics Dataset from Gulf of Mexico Gas Hydrate,'' Version v1,
+Zenodo, August 2026.  
+doi: \href{https://doi.org/10.5281/zenodo.22097128}{10.5281/zenodo.22097128}.
+
+
+
+%%%%%%%%%%%%% Trabalhos Relacionados %%%%%%%%%%%%%%%%%
+
+%%%% metodo tradicional
+\bibitem{ref_almahrooqi}
+Solatpour, R., Bryan, J.L., and Kantzas, A.:
+``On Estimating Irreducible Water Saturation in Tight Formations Using Nuclear Magnetic Resonance Relaxometry.''
+In: \textit{SPE Canada Unconventional Resources Conference},
+Calgary, Alberta, Canada, March 2018.
+Society of Petroleum Engineers.
+\doi{doi:10.2118/189803-MS.}
+
+
+%%%% DeepSWIrr: artigo do cbpf
+\bibitem{ref_fraga2025}
+Fraga, B., Coutinho, B., de Bom, C.:
+DeepSWIrr: Determining irreducible water saturation from raw Nuclear Magnetic Resonance decays using deep learning.
+In: 19th Congress of the Brazilian Geophysical Society (2025).
+\doi{10.22564/19cisbgf2025.117}
+
+%%%% outro artigo que usa os dados brutos de rmn
+\bibitem{ref_li2026}
+Li, Q., Wang, C., Ge, X., Chi, R., Wang, Y., Zhang, W., Miao, Q., Zhang, J.:
+Direct Prediction of Oil Saturation from NMR $T_2$ Spectra Using Unsupervised Feature
+Decoupling and Deep Learning.
+In: EGU General Assembly 2026, Vienna, Austria, EGU26-3276 (2026).
+\doi{10.5194/egusphere-egu26-3276}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+%%%% 
+\bibitem{ref_liu_j2022}
+Liu, J., Xie, R., Guo, J., Wei, H., Fan, W., Jin, G.:
+Novel Method for Determining Irreducible Water Saturation in a Tight Sandstone Reservoir Based on the Nuclear Magnetic Resonance T\textsubscript{2} Distribution.
+Energy \& Fuels, 36(19), September 2022.
+DOI: 10.1021/acs.energyfuels.2c02507
+
+
+
+
+
+\bibitem{ref_liu2022}
+Liu, X., et al.:
+T2 cutoff value determination methods for NMR logging.
+% TODO: complete citation (2022)
+
+\bibitem{ref_solatpour2018}
+Solatpour, A., et al.:
+NMR T2 cutoff determination methods.
+% TODO: complete citation (2018)
+
+
+\bibitem{ref_valentin2019}
+Valent\'{i}n, M.B., et al.:
+A deep learning approach for lithology classification using well log data.
+% TODO: complete citation (2019)
+
+\bibitem{ref_bom2021}
+Bom, C.R., et al.:
+Deep learning for porosity and permeability prediction from well logs.
+% TODO: complete citation (2021)
+
+\bibitem{ref_kurup2006}
+Kurup, P.U., Griffin, E.P.:
+Prediction of soil composition from CPT data using general regression neural network.
+Journal of Computing in Civil Engineering \textbf{20}(4), 281--289 (2006)
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%% Ferrametas %%%%%%%%%%%%%%%%%%%%
+
+%%%% TSFRESH: feature extraction
+\bibitem{CHRIST201872}
+M. Christ, N. Braun, J. Neuffer, and A. W. Kempa-Liehr,
+``Time Series FeatuRe Extraction on basis of Scalable Hypothesis tests (tsfresh – A Python package),''
+\textit{Neurocomputing}, vol. 307, pp. 72--77, 2018.
+doi: \href{https://doi.org/10.1016/j.neucom.2018.03.067}{10.1016/j.neucom.2018.03.067}.
+
+%%%% Otimizador: OPTUNA
+\bibitem{ref_optuna}
+Akiba, T., Sano, S., Yanase, T., Ohta, T., Koyama, M.:
+Optuna: A Next-generation Hyperparameter Optimization Framework.
+In: Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery
+\& Data Mining, pp.~2623--2631 (2019)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\end{thebibliography}
+\end{document}
