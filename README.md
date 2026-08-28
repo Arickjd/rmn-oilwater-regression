@@ -1,35 +1,44 @@
-# Trilha 1: Nuclear Magnetic Resonance (NMR)
-**Previsão da proporção óleo–água a partir de curvas de relaxação magnética usando modelos de IA**
+# NMR Water Regression
 
----
+This project focuses on analyzing and modeling Nuclear Magnetic Resonance data to predict fluid properties in porous media, specifically targeting petrophysical variables like irreducible water saturation (`Swirr_PHIX`).
 
-## Visão geral
+Using a synthetic NMR dataset, the project implements a complete machine learning pipeline, ranging from advanced signal denoising using wavelets to modeling with Physics-Informed Neural Networks (PINNs).
 
-Este projeto tem como objetivo desenvolver **modelos de IA** capazes de prever as **proporções de fluidos (óleo e água)** em rochas a partir de curvas de relaxação magnética obtidas por sequências **CPMG**.  A variável alvo é a **fração de óleo (%)** correspondente a cada curva.
+## Project Structure
 
----
+The project workflow is divided into two primary Jupyter Notebooks:
 
-## Descrição dos dados
+### 1. Data Preprocessing (`preprocessing.ipynb`)
 
-### Formato do arquivo carregado
-O dataset está em **formato tabular**. Cada linha representa uma curva M⊥(t) e a última coluna é a saturação, (para o dado de teste, não possui a coluna de saturação).
-Na etapa de pré-processamento, devido a natureza do sinal de decaimento, selecionaremos apenas o sinal até o tempo $t_{700}$
+This notebook handles data cleaning, signal processing, and dataset formatting:
 
-Exemplo de esquema:
+- **Data Loading**: Ingests raw NMR data (`GulfCoast_RMN_Synthetic.csv`).
+- **Signal Denoising**: Applies a Discrete Wavelet Transform (DWT) filter using Daubechies wavelets (`db6`, level 6, soft thresholding) across the entire dataset to remove noise from the NMR relaxation curves.
+- **Feature Extraction**: Isolates the 500-point denoised signal features and separates the target petrophysical variables (`Swirr_PHIX`, `MBVI`, `MPHI`, `PHIX`).
+- **Output**: The fully processed dataset is exported as `model_input.csv` for the modeling phase.
 
-| t₁ | t₂ | t₃ | ... | $t_{700}$ | oil_fraction |
-|----|----|----|-----|------|--------------|
+### 2. Modeling & Machine Learning (`modeling.ipynb`)
 
-- **t₁..$t_{700}$**: amostras temporais (valores de M⊥(t) com ruído)
-- **oil_fraction**: alvo em porcentagem
+This notebook leverages the preprocessed data to train deep learning models using PyTorch:
 
+- **Dimensionality Reduction**: Applies Principal Component Analysis (PCA) to reduce the dimensionality of the input data while retaining 99.9% of the variance. Data augmentation is also applied to the training set.
+- **Multilayer Perceptron (MLP)**: Implements a baseline feedforward neural network to predict the target variable directly from the NMR signals.
+- **Physics-Informed Neural Network (PINN)**: Implements an advanced, custom neural network architecture constrained by the physical equations of NMR $T_2$ relaxation.
+  - **Physical Model**: Assumes a bi-exponential relaxation curve representing oil ($o$) and water ($w$) phases:
+    $$
+    f(t) = A_o e^{-t/T_{2,o}} + A_w e^{-t/T_{2,w}}
+    $$
+  - **Architecture**: The network outputs 4 distinct physical parameters: $A_o$, $A_w$, $T_{2,o}$, and $T_{2,w}$.
+  - **Custom Loss Function**: The training error is composed of two synergistic parts:
+    1. **Output Error**: Compares the physical fluid fraction ($A_o/(A_o+A_w)$) against the traditional target label $y$.
+    2. **Fit Error**: Uses the network's 4 predicted parameters to mathematically reconstruct the curve $f(t)$, evaluating the reconstruction error against the true input curve $x$.
 
-### Proporções de fluido
-- Fração de óleo varia entre **0% e 80%**
+## Requirements
 
----
+The project requires the following primary Python libraries:
 
-## Bibliotecas sugeridas e ambiente
-
-- requirements.txt
-- Ambiente PyTorch (CUDA 12.4)
+- `numpy`, `pandas` (Data manipulation)
+- `matplotlib`, `seaborn` (Data visualization)
+- `PyWavelets` / `pywt` (DWT Denoising)
+- `scikit-learn` (PCA and preprocessing)
+- `PyTorch` (Deep learning and PINN implementation)

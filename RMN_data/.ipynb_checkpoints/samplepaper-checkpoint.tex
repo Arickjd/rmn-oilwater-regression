@@ -1,0 +1,402 @@
+% Rewritten based on project.md
+% LLNCS macro package for Springer Computer Science proceedings
+% Version 2.21 of 2022/01/12
+%
+\documentclass[runningheads]{llncs}
+%
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\renewcommand\UrlFont{\color{blue}\rmfamily}
+\urlstyle{rm}
+%
+\begin{document}
+%
+\title{Prediction of Water Saturation from Raw NMR Signals Using Deep Learning and Physics-Informed Approaches}
+
+\titlerunning{Water Saturation Prediction from Raw NMR Signals}
+
+\author{
+Arick Jurdan dos Reis\inst{1} \and
+Lorena Mamede Botelho\inst{1} \and
+Claudio Miceli de Farias\inst{1} \and
+Juan Pedro Perri Barreto\inst{1} \and
+Marcio Mendes Taddei\inst{2}
+}
+
+\authorrunning{A. J. Reis et al.}
+
+\institute{
+Instituto T\'{e}rcio Pacitti de Aplica\c{c}\~{o}es e Pesquisas Computacionais (NCE),
+Federal University of Rio de Janeiro (UFRJ), Rio de Janeiro, Brazil
+\email{analytica@labnet.nce.ufrj.br}
+\and
+Brazilian Center for Research in Physics (CBPF),
+Rio de Janeiro, Brazil
+\email{mtaddei@cbpf.br}
+\and
+Energy Research Office (EPE),
+Rio de Janeiro, Brazil
+\email{arick.reis@epe.gov.br}
+}
+
+\maketitle
+%
+\begin{abstract}
+Water saturation is a key petrophysical property for reservoir characterization and hydrocarbon volume estimation.
+Conventional approaches rely on inverting Nuclear Magnetic Resonance (NMR) relaxation decays into $T_2$ distributions
+and applying empirical cutoff values, a process that is both ill-posed and sensitive to modeling choices.
+In this work we investigate whether machine-learning and deep-learning models can predict water saturation
+directly from raw CPMG echo trains, bypassing the intermediate inversion step entirely.
+We compare two input strategies---raw magnetization curves and inverted $T_2$ spectra---across a broad model
+zoo that includes gradient-boosted trees (LightGBM, CatBoost), Random Forest, Logistic Regression, MLP,
+CNNs, recurrent architectures (GRU, BiLSTM), Temporal Convolutional Networks, Temporal Fusion Transformers,
+a Vanilla Transformer encoder, symbolic regression (PySR), and a physics-informed MLP.
+A preprocessing pipeline combining ReLU activation, Discrete Wavelet Transform denoising,
+normalization, and PCA-based dimensionality reduction is applied, with hyperparameters optimized via
+the Tree-structured Parzen Estimator (TPE) in Optuna. Feature extraction from the time-series
+signals is further explored using the TSFresh library at three complexity levels.
+An ensemble of the best-performing conventional and physics-informed branches is proposed.
+Models are evaluated on synthetic NMR data using MAE and RMSE.
+Results indicate that the raw-curve approach, combined with appropriate preprocessing and
+physics-informed regularization, can yield competitive saturation estimates while avoiding the
+uncertainties inherent in $T_2$ inversion.
+
+\keywords{NMR \and Water saturation \and Deep learning \and Physics-informed neural network \and Reservoir characterization}
+\end{abstract}
+
+%% ===================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Accurate determination of water saturation ($S_w$) is essential for estimating hydrocarbon volumes
+and planning reservoir development. Nuclear Magnetic Resonance (NMR) logging is one of the primary
+tools for this task: the Carr--Purcell--Meiboom--Gill (CPMG) sequence measures transverse
+magnetization decays whose relaxation times encode information about pore-size distributions,
+fluid types, and saturations~\cite{ref_coates1999}.
+
+The standard workflow first inverts the raw echo train $M(t)$ into a $T_2$ relaxation-time
+distribution using regularized inverse Laplace transforms (e.g., Tikhonov regularization).
+A cutoff value is then applied to partition bound and free fluid, from which $S_w$ is inferred.
+This two-step procedure, however, is inherently ill-posed: the inversion is sensitive to
+regularization parameters and noise models, meaning that different implementations can yield
+different $T_2$ distributions---and therefore different saturations---from the same raw data~\cite{ref_deepswirr}.
+Setting the cutoff value introduces additional ambiguity, and several competing methods have been
+proposed without a clear consensus~\cite{ref_liu2022,ref_solatpour2018}.
+
+These difficulties are amplified in unconventional reservoirs such as shales, where strong
+heterogeneity, multi-fluid signal overlap, and weak relaxation responses undermine conventional
+cutoff- and template-based saturation methods~\cite{ref_li2026}.
+
+Recent advances in deep learning (DL) offer an alternative path. DL models can learn complex
+nonlinear mappings from high-dimensional inputs without explicit physical modeling and have already
+been applied successfully to several petrophysical tasks: lithology classification~\cite{ref_valentin2019},
+porosity and permeability prediction~\cite{ref_bom2021}, and subsurface
+characterization~\cite{ref_kurup2006}. Notably, Reis et al.~\cite{ref_deepswirr} demonstrated
+that a multi-scale convolutional network can estimate irreducible water saturation ($S_{w,irr}$)
+directly from raw NMR echo trains with a correlation coefficient of approximately~0.9, bypassing
+the $T_2$ inversion entirely. Similarly, Li et al.~\cite{ref_li2026} proposed a workflow that
+combines unsupervised feature decoupling with a compact CNN to predict oil saturation from
+$T_2$ spectra in shale reservoirs.
+
+In this work, we extend the direct-prediction paradigm to water saturation by systematically
+comparing a wide range of machine-learning and deep-learning architectures on synthetic NMR data.
+We further propose a physics-informed MLP that incorporates known physical constraints into the
+learning process, and combine it with conventional models in an ensemble pipeline.
+
+%% ===================================================================
+\section{Related Work}
+\label{sec:related}
+
+\subsection{DeepSWIrr}
+Reis et al.~\cite{ref_deepswirr} estimated irreducible water saturation ($S_{w,irr}$)
+directly from laboratory NMR echo trains using a multi-scale convolutional network.
+Working with 821~carbonate-reservoir plugs from the Brazilian pre-salt, they preprocessed
+the data by rotating channels to separate signal from noise and truncating each echo train
+to 1000~points. Because labeled laboratory samples were scarce, a physically motivated
+data-augmentation scheme was introduced: pairs or triplets of plugs are linearly combined
+with a random weight~$w$, yielding synthetic magnetization curves
+\begin{equation}
+  m(w) = w\,m_1 + (1-w)\,m_2
+  \label{eq:aug_m}
+\end{equation}
+and corresponding synthetic saturations
+\begin{equation}
+  S_w(w) =
+  \frac{w\,S_{w,1}\,V_{B,1}\,\phi_1 + (1-w)\,S_{w,2}\,V_{B,2}\,\phi_2}
+       {w\,V_{B,1}\,\phi_1 + (1-w)\,V_{B,2}\,\phi_2},
+  \label{eq:aug_sw}
+\end{equation}
+where $V_B$ denotes bulk volume and $\phi$~porosity.
+The model achieved a correlation of approximately~0.9 on a 50-plug blind test set,
+with better performance on low-bulkiness samples.
+
+\subsection{Direct Prediction of Oil Saturation from NMR $T_2$ Spectra}
+Li et al.~\cite{ref_li2026} proposed a data-driven workflow for predicting oil saturation
+from NMR~$T_2$ spectra in shale reservoirs. Their pipeline applies robust preprocessing,
+dimensionality reduction, unsupervised clustering to decouple overlapping fluid signals,
+and a lightweight CNN regressor. Validated on core--log paired data, the method showed
+improved stability over conventional interpretation in complex intervals.
+
+%% ===================================================================
+\section{Methodology}
+\label{sec:method}
+
+\subsection{Data}
+\label{sec:data}
+
+We use synthetic NMR data generated following the procedure described in~\cite{ref_deepswirr},
+under two key physical assumptions:
+\begin{enumerate}
+  \item Pore sizes follow a log-normal distribution.
+  \item Each sample corresponds to a single pore system.
+\end{enumerate}
+% TODO: add details on synthetic data generation (number of samples, SNR levels, parameter ranges).
+
+\subsection{Input Strategies}
+\label{sec:input}
+
+We investigate two complementary input representations:
+
+\paragraph{Raw-curve approach.}
+The input features~$\mathbf{X}$ are the temporal samples of the magnetization decay $M(t)$
+(e.g., 2048~echoes from a CPMG sequence), and the target~$Y$ is the water
+saturation~$S_w$ (or equivalently the oil saturation $S_o = 1 - S_w$).
+
+\paragraph{Inverted-spectrum approach.}
+The decay $M(t)$ is first inverted into a $T_2$ distribution using classical regularization
+(e.g., Tikhonov). The input features become the amplitudes of the $T_2$ spectrum
+(typically 64 or 128~bins). This representation is adopted in most of the existing literature.
+
+\subsection{Preprocessing Pipeline}
+\label{sec:preproc}
+
+All input curves undergo the following sequential preprocessing steps (Fig.~\ref{fig:pipeline}):
+\begin{enumerate}
+  \item \textbf{ReLU clipping}: negative values are set to zero, removing unphysical amplitudes.
+  \item \textbf{Discrete Wavelet Transform (DWT) denoising}: a wavelet-based smoothing is applied.
+        The DWT is preferred over the traditional Savitzky--Golay filter because it better preserves
+        sharp features in the decay while removing high-frequency noise.
+  \item \textbf{Normalization}: curves are scaled to a standard range.
+\end{enumerate}
+
+\paragraph{Feature extraction with TSFresh.}
+For tree-based and classical ML models, we additionally extract time-series features using the
+TSFresh library~\cite{ref_tsfresh}. TSFresh applies statistical hypothesis tests to assess
+feature relevance, reducing overfitting risk while scaling efficiently to multiple simultaneous
+time series. We evaluate three extraction levels at two input lengths (700 and 2000~points):
+\begin{itemize}
+  \item \texttt{MinimalFCParameters}: fast and stable baseline features.
+  \item \texttt{EfficientFCParameters}: a richer feature set with moderate computational cost.
+  \item \texttt{ComprehensiveFCParameters}: an exhaustive but computationally expensive feature set.
+\end{itemize}
+
+\subsection{Models}
+\label{sec:models}
+
+We benchmark the following models, grouped by family:
+
+\paragraph{Tree-based and classical ML.}
+\begin{itemize}
+  \item \textbf{LightGBM}~\cite{ref_lightgbm}: highly efficient gradient-boosted decision trees.
+  \item \textbf{CatBoost}~\cite{ref_catboost}: gradient boosting with native categorical support.
+  \item \textbf{Random Forest}: scikit-learn implementation.
+  \item \textbf{Logistic Regression}: linear baseline (scikit-learn).
+  \item \textbf{Symbolic Regression}: PySRRegressor via scikit-learn interface, seeking interpretable
+        closed-form expressions.
+\end{itemize}
+
+\paragraph{Feedforward and physics-informed networks.}
+\begin{itemize}
+  \item \textbf{MLP}: multi-layer perceptron baseline (PyTorch).
+  \item \textbf{Physics-Informed MLP}: an MLP augmented with physics-based loss terms
+        encoding known NMR relaxation constraints (our approach).
+\end{itemize}
+
+\paragraph{Convolutional and temporal models.}
+\begin{itemize}
+  \item \textbf{CNN}: standard convolutional neural network (PyTorch).
+  \item \textbf{Temporal Convolutional Network (TCN)}: dilated causal convolutions (PyTorch).
+\end{itemize}
+
+\paragraph{Recurrent models.}
+\begin{itemize}
+  \item \textbf{GRU}~\cite{ref_gru}: gated recurrent units.
+  \item \textbf{BiLSTM}~\cite{ref_bilstm}: bidirectional long short-term memory, adapted
+        for sequence-to-one regression.
+\end{itemize}
+
+\paragraph{Attention-based models.}
+\begin{itemize}
+  \item \textbf{Temporal Fusion Transformer (TFT)}~\cite{ref_tft}: originally designed for
+        multi-horizon time-series forecasting; we adapt its architecture from sequence-to-sequence
+        to sequence-to-scalar regression.
+  \item \textbf{Vanilla Transformer}: encoder-only architecture.
+\end{itemize}
+
+\subsection{Hyperparameter Optimization}
+\label{sec:optim}
+
+All model hyperparameters are tuned using \textbf{Optuna}~\cite{ref_optuna}, with the default
+Tree-structured Parzen Estimator (TPE) as the sampling strategy. The objective is to minimize
+validation RMSE.
+
+\subsection{Ensemble Strategy}
+\label{sec:ensemble}
+
+The final prediction is produced by an ensemble that combines the outputs of the best conventional
+model branch (PCA $\rightarrow$ MLP) with the physics-informed MLP (PINN) branch, as illustrated
+in Fig.~\ref{fig:pipeline}.
+
+\begin{figure}[t]
+  \centering
+  % TODO: replace with actual pipeline figure
+  % The pipeline follows: Data -> ReLU -> DWT -> Norm -> {PCA -> MLP, PINN} -> Ensemble -> Output
+  \fbox{\parbox{0.9\textwidth}{\centering\vspace{2em}%
+    \textbf{Pipeline diagram placeholder}\\[0.5em]
+    Data $\rightarrow$ ReLU $\rightarrow$ DWT $\rightarrow$ Norm
+    $\rightarrow$ \{PCA $\rightarrow$ MLP,\; PINN\}
+    $\rightarrow$ Ensemble $\rightarrow$ Output
+  \vspace{2em}}}
+  \caption{Overview of the proposed preprocessing and modeling pipeline. Raw NMR decay curves
+  are preprocessed (ReLU clipping, DWT denoising, normalization) and then fed into two parallel
+  branches: a PCA-reduced MLP and a physics-informed neural network (PINN). The outputs are
+  combined in an ensemble to produce the final water-saturation estimate.}
+  \label{fig:pipeline}
+\end{figure}
+
+\subsection{Evaluation Metrics}
+\label{sec:metrics}
+
+All models are evaluated using:
+\begin{itemize}
+  \item \textbf{Mean Absolute Error (MAE)}: $\text{MAE} = \frac{1}{n}\sum_{i=1}^{n}|y_i - \hat{y}_i|$
+  \item \textbf{Root Mean Squared Error (RMSE)}: $\text{RMSE} = \sqrt{\frac{1}{n}\sum_{i=1}^{n}(y_i - \hat{y}_i)^2}$
+\end{itemize}
+
+%% ===================================================================
+\section{Results}
+\label{sec:results}
+
+% TODO: Insert experimental results here.
+% No experimental results are available yet. Tables and figures comparing model
+% performance (MAE, RMSE) across all architectures and input strategies should be
+% added once experiments are complete.
+
+\textit{Experimental results are pending. This section will report MAE and RMSE for all models
+under both input strategies (raw curve and inverted spectrum), together with ablation studies
+on preprocessing steps and feature-extraction configurations.}
+
+%% ===================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+% TODO: Write conclusions after results are available.
+
+\textit{Conclusions will be drawn once experimental evaluation is complete. We expect to
+demonstrate that the raw-curve approach, augmented with physics-informed regularization and
+ensemble strategies, offers a viable alternative to the conventional $T_2$-inversion pipeline
+for water-saturation prediction from NMR data.}
+
+%% ===================================================================
+\begin{credits}
+\subsubsection{\ackname}
+The authors thank the Brazilian Center for Research in Physics (CBPF),
+Petrobras, and the LabNet laboratory at UFRJ for supporting this research.
+
+\subsubsection{\discintname}
+The authors have no competing interests to declare that are relevant to the
+content of this article.
+\end{credits}
+
+%% ===================================================================
+% Bibliography
+%
+\bibliographystyle{splncs04}
+%
+\begin{thebibliography}{15}
+
+\bibitem{ref_coates1999}
+Coates, G.R., Xiao, L., Prammer, M.G.:
+NMR Logging: Principles and Applications.
+Halliburton Energy Services, Houston (1999)
+
+\bibitem{ref_deepswirr}
+Reis, A.J., et al.:
+DeepSWIrr: Determining irreducible water saturation from raw Nuclear Magnetic Resonance
+decays using deep learning.
+% TODO: add journal/conference, volume, pages, year
+
+\bibitem{ref_liu2022}
+Liu, X., et al.:
+T2 cutoff value determination methods for NMR logging.
+% TODO: complete citation (2022)
+
+\bibitem{ref_solatpour2018}
+Solatpour, A., et al.:
+NMR T2 cutoff determination methods.
+% TODO: complete citation (2018)
+
+\bibitem{ref_li2026}
+Li, Q., Wang, C., Ge, X., Chi, R., Wang, Y., Zhang, W., Miao, Q., Zhang, J.:
+Direct Prediction of Oil Saturation from NMR $T_2$ Spectra Using Unsupervised Feature
+Decoupling and Deep Learning.
+In: EGU General Assembly 2026, Vienna, Austria, EGU26-3276 (2026).
+\doi{10.5194/egusphere-egu26-3276}
+
+\bibitem{ref_valentin2019}
+Valent\'{i}n, M.B., et al.:
+A deep learning approach for lithology classification using well log data.
+% TODO: complete citation (2019)
+
+\bibitem{ref_bom2021}
+Bom, C.R., et al.:
+Deep learning for porosity and permeability prediction from well logs.
+% TODO: complete citation (2021)
+
+\bibitem{ref_kurup2006}
+Kurup, P.U., Griffin, E.P.:
+Prediction of soil composition from CPT data using general regression neural network.
+Journal of Computing in Civil Engineering \textbf{20}(4), 281--289 (2006)
+
+\bibitem{ref_tsfresh}
+Christ, M., Braun, N., Neuffer, J., Kempa-Liehr, A.W.:
+Time Series FeatuRe Extraction on basis of Scalable Hypothesis tests (tsfresh -- A Python package).
+Neurocomputing \textbf{307}, 72--77 (2018)
+
+\bibitem{ref_lightgbm}
+Ke, G., Meng, Q., Finley, T., Wang, T., Chen, W., Ma, W., Ye, Q., Liu, T.-Y.:
+LightGBM: A Highly Efficient Gradient Boosting Decision Tree.
+In: Advances in Neural Information Processing Systems~30, pp.~3146--3154 (2017)
+
+\bibitem{ref_catboost}
+Prokhorenkova, L., Gusev, G., Vorobev, A., Dorogush, A.V., Gulin, A.:
+CatBoost: unbiased boosting with categorical features.
+In: Advances in Neural Information Processing Systems~31, pp.~6638--6648 (2018)
+
+\bibitem{ref_gru}
+Chung, J., Gulcehre, C., Cho, K., Bengio, Y.:
+Empirical Evaluation of Gated Recurrent Neural Networks on Sequence Modeling.
+arXiv preprint arXiv:1412.3555 (2014)
+
+\bibitem{ref_bilstm}
+MathWorks:
+Sequence-to-One Regression Using Deep Learning.
+MATLAB \& Simulink Documentation.
+\url{https://www.mathworks.com/help/deeplearning/ug/sequence-to-one-regression-using-deep-learning.html}
+
+\bibitem{ref_tft}
+Lim, B., Ar\'{i}k, S.\"{O}., Loeff, N., Pfister, T.:
+Temporal Fusion Transformers for Interpretable Multi-horizon Time Series Forecasting.
+International Journal of Forecasting \textbf{37}(4), 1748--1764 (2021)
+
+\bibitem{ref_optuna}
+Akiba, T., Sano, S., Yanase, T., Ohta, T., Koyama, M.:
+Optuna: A Next-generation Hyperparameter Optimization Framework.
+In: Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery
+\& Data Mining, pp.~2623--2631 (2019)
+
+\end{thebibliography}
+\end{document}
