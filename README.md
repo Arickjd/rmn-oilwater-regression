@@ -2,7 +2,7 @@
 
 This repository contains the experimental code for **Water Saturation in Porous Media from Nuclear Magnetic Resonance Data Using Physics-Informed Neural Networks**. It predicts irreducible water saturation (`Swirr_PHIX`) directly from Nuclear Magnetic Resonance (NMR) magnetization-decay curves, without requiring a separate inverse $T_2$-distribution workflow.
 
-The project compares a PCA-based multilayer perceptron (MLP) with three physics-informed neural network (PINN) formulations. The accompanying manuscript is available in [paper.tex](paper.tex).
+The project compares a PCA-based multilayer perceptron (MLP) with three physics-informed neural network (PINN) formulations.
 
 ![Held-out test predictions across the four models](assets/scatter_models_1x4.png)
 
@@ -10,32 +10,28 @@ The project compares a PCA-based multilayer perceptron (MLP) with three physics-
 
 The input is a synthetic Gulf of Mexico gas-hydrate NMR dataset derived from well-log and petrophysical information. Each record represents a distinct NMR sample from the same well and contains:
 
-| Item | Description |
-| --- | --- |
-| Raw input | 3,000 echo amplitudes describing an NMR transverse-magnetization decay |
-| Target | Irreducible water saturation, `Swirr_PHIX` |
-| Auxiliary properties | `MBVI`, `MPHI`, and `PHIX` |
-| Original samples | 575 |
-| Processed input | 500 echo bins per sample |
+| Item                 | Description                                                            |
+| -------------------- | ---------------------------------------------------------------------- |
+| Raw input            | 3,000 echo amplitudes describing an NMR transverse-magnetization decay |
+| Target               | Irreducible water saturation,`Swirr_PHIX`                              |
+| Auxiliary properties | `MBVI`, `MPHI`, and `PHIX`                                             |
+| Original samples     | 575                                                                    |
+| Processed input      | 500 echo bins per sample                                               |
 
 The preprocessing stage denoises each curve with a Daubechies-6 discrete wavelet transform, applies per-curve min--max normalization, removes the last 1,000 echoes, and averages consecutive echoes in groups of four. This reduces each signal from 3,000 to 500 values.
 
 ![Original and DWT-denoised NMR curves](assets/denoising.png)
 
-The training partition is enlarged with physically motivated MixUp. Two original NMR curves are linearly combined, while `MBVI`, `MPHI`, and `PHIX` are interpolated consistently. The synthetic saturation is then recomputed as:
-
-\[
-S_{wirr,\mathrm{syn}} = \frac{MBVI_{\mathrm{syn}}}{PHIX_{\mathrm{syn}}}.
-\]
+The training partition is enlarged with physically motivated MixUp. Two original NMR curves are linearly combined, while `MBVI`, `MPHI`, and `PHIX` are interpolated consistently.
 
 ## Models
 
-| Model | Input | Main idea |
-| --- | --- | --- |
-| **MLP + PCA** | PCA components retaining 99.9% variance | Data-driven regression baseline with two hidden layers |
-| **Base PINN** | 500 processed echo values | Predicts amplitudes and relaxation times, reconstructing a bi-exponential decay |
-| **PINN log($T_2$)** | 500 processed echo values | Uses a log-space parameterization for positive relaxation times |
-| **Direct-saturation PINN** | 500 processed echo values | Predicts `Swirr` directly while retaining a constrained bi-exponential reconstruction loss |
+| Model                      | Input                                   | Main idea                                                                                 |
+| -------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **MLP + PCA**              | PCA components retaining 99.9% variance | Data-driven regression baseline with two hidden layers                                    |
+| **Base PINN**              | 500 processed echo values               | Predicts amplitudes and relaxation times, reconstructing a bi-exponential decay           |
+| **PINN log($T_2$)**        | 500 processed echo values               | Uses a log-space parameterization for positive relaxation times                           |
+| **Direct-saturation PINN** | 500 processed echo values               | Predicts`Swirr` directly while retaining a constrained bi-exponential reconstruction loss |
 
 The three PINNs share a 500 → 128 → 32 → 4 fully connected backbone. The direct-saturation variant gives more emphasis to saturation accuracy while still penalizing physically implausible signal reconstructions.
 
@@ -46,17 +42,17 @@ The evaluation is designed to estimate performance on **new NMR samples from the
 - 175 original samples are held out for the final test.
 - The remaining 400 samples are used for repeated five-fold cross-validation with three repetitions.
 - Each outer fold uses an internal 20% validation holdout for checkpoint selection and learning-rate scheduling.
-- PCA and MixUp are fitted or generated only from the training samples of the relevant split.
+- PCA are fitted or generated only from the training samples of the relevant split.
 - RMSE, MAE, and $R^2$ are computed from out-of-fold predictions.
 - The final test reports 95% percentile confidence intervals from 2,000 paired bootstrap resamples.
 
 The MLP was selected by mean out-of-fold RMSE in the repeated cross-validation. On the final test split, the direct-saturation PINN had the best point estimates. The confidence intervals and pairwise bootstrap comparisons are saved with every pipeline run.
 
-| Model | Test RMSE | Test MAE | Test $R^2$ |
-| --- | ---: | ---: | ---: |
-| MLP + PCA | 0.1013 | 0.0678 | 0.7393 |
-| Base PINN | 0.1067 | 0.0788 | 0.7110 |
-| PINN log($T_2$) | 0.1047 | 0.0735 | 0.7216 |
+| Model                  |  Test RMSE |   Test MAE |  Test$R^2$ |
+| ---------------------- | ---------: | ---------: | ---------: |
+| MLP + PCA              |     0.1013 |     0.0678 |     0.7393 |
+| Base PINN              |     0.1067 |     0.0788 |     0.7110 |
+| PINN log($T_2$)        |     0.1047 |     0.0735 |     0.7216 |
 | Direct-saturation PINN | **0.0980** | **0.0677** | **0.7558** |
 
 ![Cross-validation scores across folds](assets/cv_fold_scores.png)
@@ -91,18 +87,18 @@ Run `main.py --help` for all options, including cross-validation folds, repetiti
 
 Each full execution produces the following under `output/pipeline/` by default:
 
-| Path | Contents |
-| --- | --- |
-| `model_input.csv` | Processed signals and petrophysical properties |
-| `splits.csv` | Original-sample train, validation, and test assignments |
-| `train_augmented.csv` | Training data after MixUp augmentation |
-| `metrics.csv` and `predictions_test.csv` | Test metrics and aligned predictions |
-| `cross_validation/` | Fold assignments, out-of-fold predictions, histories, and model selection |
-| `test_confidence_intervals.csv` | 95% bootstrap confidence intervals |
-| `test_paired_comparisons.csv` | Paired bootstrap differences between models |
-| `evaluation_report.md` | Plain-language evaluation report and caveats |
-| `checkpoints/` | PyTorch model weights and the fitted PCA object |
-| `figures/` | Publication-oriented PNG and PDF figures |
+| Path                                     | Contents                                                                  |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| `model_input.csv`                        | Processed signals and petrophysical properties                            |
+| `splits.csv`                             | Original-sample train, validation, and test assignments                   |
+| `train_augmented.csv`                    | Training data after MixUp augmentation                                    |
+| `metrics.csv` and `predictions_test.csv` | Test metrics and aligned predictions                                      |
+| `cross_validation/`                      | Fold assignments, out-of-fold predictions, histories, and model selection |
+| `test_confidence_intervals.csv`          | 95% bootstrap confidence intervals                                        |
+| `test_paired_comparisons.csv`            | Paired bootstrap differences between models                               |
+| `evaluation_report.md`                   | Plain-language evaluation report and caveats                              |
+| `checkpoints/`                           | PyTorch model weights and the fitted PCA object                           |
+| `figures/`                               | Publication-oriented PNG and PDF figures                                  |
 
 ## Repository layout
 
@@ -115,22 +111,15 @@ assets/                 Figures displayed in this README
 RMN_data/               Synthetic NMR dataset used by the experiment
 output/                 Generated artifacts; ignored by Git
 tests/                  Unit and numerical validation tests
-paper.tex               Manuscript source
 ```
 
-## Tests
+## Data source
 
-```powershell
-.venv/Scripts/python -m unittest discover -s tests -v
-```
-
-The test suite checks signal preprocessing, the physical MixUp relationship, leakage-safe partitioning, PCA fitting, PINN losses, cross-validation coverage, bootstrap intervals, and finite gradients.
+[https://doi.org/10.5281/zenodo.22097128](https://doi.org/10.5281/zenodo.22097128) - Reis, A., & Mamede Botelho, L. (2026). Nuclear Magnetic Resonance Synthetics Dataset from Gulf of Mexico Gas Hydrate.
 
 ## Authors
 
-- **Arick Jurdan dos Reis** — Instituto Tércio Pacitti de Aplicações e Pesquisas Computacionais, Federal University of Rio de Janeiro (UFRJ)
-- **Lorena Mamede Botelho** — Instituto Tércio Pacitti de Aplicações e Pesquisas Computacionais, Federal University of Rio de Janeiro (UFRJ)
-- **Claudio Miceli de Farias** — Instituto Tércio Pacitti de Aplicações e Pesquisas Computacionais, Federal University of Rio de Janeiro (UFRJ)
-- **Marcio Mendes Taddei** — Brazilian Center for Research in Physics (CBPF)
-
-For experimental context, model details, and the dataset reference, see [paper.tex](paper.tex).
+- **Arick Jurdan dos Reis** (UFRJ)
+- **Lorena Mamede Botelho** (UFRJ)
+- **Claudio Miceli de Farias** (UFRJ)
+- **Marcio Mendes Taddei** (CBPF)
